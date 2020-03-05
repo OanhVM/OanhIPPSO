@@ -1,0 +1,5 @@
+bidcap==0.0.1
+pyswarm
+tensorflow==1.14
+keras==2.2.4
+numpy==1.16.4

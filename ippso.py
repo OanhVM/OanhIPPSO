@@ -6,10 +6,6 @@ from keras.optimizers import Adadelta
 from keras.utils import to_categorical
 from pyswarm import pso
 
-# import the loader tool
-from bidcap.utils.loader import ImagesetLoader
-
-#
 # import pyswarms as ps
 
 _CON_LAYER_STRIDE_END_BITS = 15
@@ -49,18 +45,6 @@ _END_RANGE = 255
 
 _IP_NUMBER_OF_BITS = 16
 
-
-# def load_data_from_mrdbi():
-#     # import mb. Pass the dataset name described above as the first parameter
-#     data = ImagesetLoader.load("mb")
-#     # training images
-#     print(type(data.train["images"]))
-#     # training labels
-#     data.train["labels"]
-#     # test images
-#     data.test["images"]
-#     # test labels
-#     data.test["labels"]
 
 def load_data_from_mnist():
     img_shape = (28, 28, 1)
@@ -112,14 +96,17 @@ def build_model(layer_codes):
                 output_layer = conv_layer(output_layer)
 
             elif _POOL_LAYER_RANGE_1 <= layer_code[0] <= _POOL_LAYER_RANGE_2:
-                print("{}.{} belong to {}".format(*layer_code, "POOL_LAYER"))
-                pooling_layer = decode_pooling_layer(bits)
-                output_layer = pooling_layer(output_layer)
+                if idx == 0:
+                    raise ValueError("POOL_LAYER must not be at the beginning.")
+                else:
+                    print("{}.{} belong to {}".format(*layer_code, "POOL_LAYER"))
+                    pooling_layer = decode_pooling_layer(bits)
+                    output_layer = pooling_layer(output_layer)
 
             elif _FULL_LAYER_RANGE_1 <= layer_code[0] <= _FULL_LAYER_RANGE_2:
                 print("{}.{} belong to {}".format(*layer_code, "DENSE_LAYER"))
                 if idx != len(layer_codes) - 1:
-                    raise ValueError("Dense must be at the end.")
+                    raise ValueError("DENSE_LAYER must be at the end.")
                 else:
                     output_layer = Flatten()(output_layer)
 
@@ -157,22 +144,7 @@ def build_and_fit_model(x, *args):
     except ValueError:
         return 0.0
 
-    return - history.history["val_acc"]
-
-
-def conv_append(x):
-    return Conv2D(kernel_size=(x[0], x[0]), filters=x[1], strides=x[2], activation="relu")
-
-
-def pooling_append(x):
-    if x[0] == 1:
-        return MaxPooling2D(pool_size=(x[1], x[1]), strides=x[2])
-    else:
-        return AveragePooling2D(pool_size=(x[1], x[1]), strides=x[2])
-
-
-def fully_connected_append(x):
-    return Dense(x[0], activation="relu")
+    return - history.history["val_acc"][-1]
 
 
 def decode_cov_layer(bits):
@@ -215,7 +187,7 @@ def bin_to_dec_plus(n):
 def main():
     x_train, y_train, x_test, y_test = load_data_from_mnist()
 
-    for layer_count in range(5, 10):
+    for layer_count in range(5, 8):
         xopt, fopt = pso(func=build_and_fit_model,
                          lb=np.zeros(shape=layer_count * 2),
                          ub=np.dstack((np.full(shape=layer_count, fill_value=39),

@@ -5,6 +5,7 @@ from keras.layers import Conv2D, AveragePooling2D, Dense, MaxPooling2D, Input, F
 from keras.optimizers import Adadelta
 from keras.utils import to_categorical
 from pyswarm import pso
+from bidcap.utils.loader import ImagesetLoader
 
 # import pyswarms as ps
 
@@ -24,13 +25,6 @@ _POOL_LAYER_SIZE_START_BITS = 5
 _FULL_LAYER_END_BITS = 15
 _FULL_LAYER_START_BITS = 5
 
-# _CON_KERNEL_SIZE_NUMBER_OF_BITS = 3
-# _CON_FILTER_SIZE_NUMBER_OF_BITS = 7
-# _CON_STRIDE_SIZE_NUMBER_OF_BITS = 2
-# _POOL_POOL_SIZE_NUMBER_OF_BITS = 2
-# _POOL_STRIDE_SIZE_NUMBER_OF_BITS = 2
-# _DENSE_NUMBER_OF_BITS = 11
-
 _CON_LAYER_RANGE_1 = 0
 _CON_LAYER_RANGE_2 = 15
 _CONV_RANGE = (0, 15)
@@ -48,7 +42,16 @@ _IP_NUMBER_OF_BITS = 16
 
 def load_data_from_mnist():
     img_shape = (28, 28, 1)
-    (x_test, y_test), (x_train, y_train) = mnist.load_data()
+    # (x_test, y_test), (x_train, y_train) = mnist.load_data()
+    data = ImagesetLoader.load("mdrbi")
+    # training images
+    x_train = data.train["images"]
+    # training labels
+    y_train = data.train["labels"]
+    # test images
+    x_test = data.test["images"]
+    # test labels
+    y_test = data.test["labels"]
 
     x_train = x_train.reshape(x_train.shape[0], *img_shape)
     x_test = x_test.reshape(x_test.shape[0], *img_shape)
@@ -200,4 +203,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-    # load_data_from_mnist()

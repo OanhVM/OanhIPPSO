@@ -1,13 +1,14 @@
+from os.path import join, abspath, pardir
+
+import json_tricks
 import numpy as np
 from keras import Model
 from keras.datasets import mnist
 from keras.layers import Conv2D, AveragePooling2D, Dense, MaxPooling2D, Input, Flatten
 from keras.optimizers import Adadelta
-from keras.utils import to_categorical
+from keras.utils.layer_utils import count_params
+from keras_preprocessing.image import ImageDataGenerator
 from pyswarm import pso
-from bidcap.utils.loader import ImagesetLoader
-
-# import pyswarms as ps
 
 _CON_LAYER_STRIDE_END_BITS = 15
 _CON_LAYER_STRIDE_START_BITS = 14
@@ -39,23 +40,24 @@ _END_RANGE = 255
 
 _IP_NUMBER_OF_BITS = 16
 
+_RESULTS_FILE_NAME = "results.txt"
+
 
 def load_data_from_mnist():
     img_shape = (28, 28, 1)
-    # (x_test, y_test), (x_train, y_train) = mnist.load_data()
-    data = ImagesetLoader.load("mdrbi")
-    # training images
-    x_train = data.train["images"]
-    # training labels
-    y_train = data.train["labels"]
-    # test images
-    x_test = data.test["images"]
-    # test labels
-    y_test = data.test["labels"]
+    (x_test, y_test), (x_train, y_train) = mnist.load_data()
+    # data = ImagesetLoader.load("mrd")
+    # # training images
+    # x_train = data.train["images"]
+    # # training labels
+    # y_train = data.train["labels"]
+    # # test images
+    # x_test = data.test["images"]
+    # # test labels
+    # y_test = data.test["labels"]
 
     x_train = x_train.reshape(x_train.shape[0], *img_shape)
     x_test = x_test.reshape(x_test.shape[0], *img_shape)
-    input_shape = img_shape
 
     x_train = x_train.astype("float32")
     x_test = x_test.astype("float32")
@@ -77,12 +79,49 @@ def load_data_from_mnist():
     return x_train, y_train, x_test, y_test
 
 
+_DATA_SET_PATH = join(abspath(join(abspath(__file__), pardir)), "data", "intel")
+_TRAIN_DIR = join(_DATA_SET_PATH, "train")
+_VALIDATION_DIR = join(_DATA_SET_PATH, "test")
+
+_BATCH_SIZE = 500
+
+_IMG_SHAPE = (150, 150, 3)
+
+
+def generate_data():
+    train_image_generator = ImageDataGenerator(rotation_range=45,
+                                               width_shift_range=.15,
+                                               height_shift_range=.15,
+                                               horizontal_flip=True,
+                                               zoom_range=0.5)
+
+    train_data_gen = train_image_generator.flow_from_directory(batch_size=_BATCH_SIZE,
+                                                               directory=_TRAIN_DIR,
+                                                               shuffle=True,
+                                                               target_size=_IMG_SHAPE[:2],
+                                                               class_mode="categorical")
+
+    test_image_generator = ImageDataGenerator()
+
+    val_data_gen = test_image_generator.flow_from_directory(batch_size=_BATCH_SIZE,
+                                                            directory=_VALIDATION_DIR,
+                                                            shuffle=True,
+                                                            target_size=_IMG_SHAPE[:2],
+                                                            class_mode="categorical")
+    # MUAHAHAHAHAHAHAHA!!!!!
+    temp = train_data_gen
+    train_data_gen = val_data_gen
+    val_data_gen = temp
+
+    return train_data_gen, val_data_gen
+
+
 def is_valid_layer_code(layer_code):
     return 0 <= layer_code[0] <= 255 and 0 <= layer_code[1] <= 255
 
 
 def build_model(layer_codes):
-    input_layer = Input(shape=(28, 28, 1))
+    input_layer = Input(shape=_IMG_SHAPE)
     output_layer = input_layer
 
     for idx, layer_code in enumerate(layer_codes):
@@ -116,15 +155,14 @@ def build_model(layer_codes):
                     dense_layer = decode_dense(bits)
                     output_layer = dense_layer(output_layer)
 
-    output_layer = Dense(10, activation="softmax")(output_layer)
+    output_layer = Dense(6, activation="softmax")(output_layer)
     model = Model(input_layer, output_layer)
 
     return model
 
 
 def build_and_fit_model(x, *args):
-    x_train, y_train, x_test, y_test = args
-    # x = [6, 119, 21, 112, 35, 255, 27, 255]
+    train_data_gen, val_data_gen = args
 
     layer_codes = np.array(x).reshape(-1, 2).astype(int)
     print(layer_codes)
@@ -137,17 +175,34 @@ def build_and_fit_model(x, *args):
     model.compile(loss="categorical_crossentropy", optimizer=Adadelta(), metrics=["accuracy"])
 
     print(model.summary())
+    trainable_count = count_params(model.trainable_weights)
+    print("trainable_count", trainable_count)
+    if trainable_count > 0:
+        try:
+            history = model.fit_generator(
+                generator=train_data_gen,
+                steps_per_epoch=train_data_gen.n // train_data_gen.batch_size,
+                epochs=10,
+                validation_data=val_data_gen,
+                validation_steps=val_data_gen.n // val_data_gen.batch_size,
+                verbose=1
+            )
+        except ValueError:
+            return 0.0
 
-    try:
-        history = model.fit(x_train, y_train,
-                            batch_size=50,
-                            epochs=10,
-                            verbose=1,
-                            validation_data=(x_test, y_test))
-    except ValueError:
-        return 0.0
+        val_acc = history.history["val_acc"][-1]
+        with open(_RESULTS_FILE_NAME, "a") as f:
+            f.write("{}\n".format(
+                json_tricks.dumps({
+                    "model_config": model.to_json(),
+                    "val_acc": val_acc,
+                }, indent=4, sort_keys=True)
+            ))
 
-    return - history.history["val_acc"][-1]
+    else:
+        val_acc = 0.0
+
+    return - val_acc
 
 
 def decode_cov_layer(bits):
@@ -188,15 +243,17 @@ def bin_to_dec_plus(n):
 
 
 def main():
-    x_train, y_train, x_test, y_test = load_data_from_mnist()
+    # x_train, y_train, x_test, y_test = load_data_from_mnist()
+    train_data_gen, val_data_gen = generate_data()
 
-    for layer_count in range(5, 8):
+    for layer_count in range(5, 6):
         xopt, fopt = pso(func=build_and_fit_model,
                          lb=np.zeros(shape=layer_count * 2),
                          ub=np.dstack((np.full(shape=layer_count, fill_value=39),
                                        np.full(shape=layer_count, fill_value=255))).flatten(),
-                         minstep=1.0,
-                         args=(x_train, y_train, x_test, y_test))
+                         # minstep=1.0,
+                         maxiter=50,
+                         args=(train_data_gen, val_data_gen))
         print(xopt)
         print(fopt)
 
